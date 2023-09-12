@@ -1,0 +1,124 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Transform: AWS::Serverless-2016-10-31
+
+Description: AWS SAM + Swagger Template
+
+Parameters:
+  SystemName:
+    Type: String
+    Default: playground
+  Env:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - test
+      - dev
+      - stg
+      - prod
+  LogLevel:
+    Type: String
+    Default: DEBUG
+    AllowedValues:
+      - DEBUG
+      - INFO
+  # UserPoolArn:
+  #   Type: String
+  #   Default: arn:aws:cognito-idp:ap-northeast-1:<AccountId>:userpool/<UserPoolId>
+
+Globals:
+  # -----------------------------------------------------------------
+  # Lambda の共通定義
+  # -----------------------------------------------------------------
+  Function:
+    CodeUri: ./src/
+    Runtime: python3.11
+    Timeout: 180
+    MemorySize: 1024
+    Environment:
+      Variables:
+        LOG_LEVEL: !Ref LogLevel
+
+Resources:
+  # -----------------------------------------------------------------
+  # API Geteway の定義
+  #
+  # デフォルトで「Lambda プロキシ統合」になるため、非プロキシ統合 (カスタム設定) の構築する
+  # -----------------------------------------------------------------
+  PlaygroundApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub ${SystemName}-${Env}-apigetway-playground
+      StageName: !Ref Env
+      BinaryMediaTypes:
+        - multipart/form-data
+      DefinitionBody:
+        Fn::Transform:
+          Name: AWS::Include
+          Parameters:
+            Location: swagger.yaml
+
+  # -----------------------------------------------------------------
+  # API Gateway への Role の定義
+  # -----------------------------------------------------------------
+  PlaygroundApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${SystemName}-${Env}-apigateway-playground-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+            Action: sts:AssumeRole
+
+  # -----------------------------------------------------------------
+  # API Gateway への Policy の定義
+  # -----------------------------------------------------------------
+  PlaygroundApiPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${SystemName}-${Env}-apigateway-playground-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "lambda:InvokeFunction"
+            Resource:
+              - !GetAtt GetFunction.Arn
+              - !GetAtt PostFunction.Arn
+      Roles:
+        - !Ref PlaygroundApiRole
+
+  # -----------------------------------------------------------------
+  # Lambda の定義
+  # -----------------------------------------------------------------
+  GetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${SystemName}-${Env}-lambda-get-playground
+      Description: GET API 用 Lambda 関数
+      Handler: playground.functions.get.lambda_handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+
+  PostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${SystemName}-${Env}-lambda-post-playground
+      Description: POST API 用 Lambda 関数
+      Handler: playground.functions.post.lambda_handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+
+Outputs:
+  PlaygroundApiUrl:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub https://${PlaygroundApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}/device
+  PlaygroundApiId:
+    Description: "API Gateway ID"
+    Value: !Ref PlaygroundApi

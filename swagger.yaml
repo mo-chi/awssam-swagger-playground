@@ -1,0 +1,154 @@
+openapi: 3.0.1
+
+info:
+  description: "REST API 定義"
+  version: "1.0.0"
+  title: "PlaygroundApi"
+
+paths:
+  /device:
+    get:
+      summary: "デバイス情報の取得 API"
+      # Cognito Authorizer を有効にする場合
+      # security:
+      #   - cognitoAuthorizer: []
+      responses:
+        200:
+          description: "成功時のレスポンス"
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: "string"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/device"
+      x-amazon-apigateway-integration:
+        # Lambda 関数のみを呼び出す場合は AWS_PROXY
+        type: AWS_PROXY
+        # Lambda 関数を呼び出す場合は POST
+        httpMethod: POST
+        credentials:
+          Fn::Sub: ${PlaygroundApiRole.Arn}
+        uri:
+          # API Gateway が実行する　Lambda　関数の　ARN
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetFunction.Arn}/invocations
+        passthroughBehavior: WHEN_NO_TEMPLATES
+        contentHandling: CONVERT_TO_TEXT
+        responses:
+          default:
+            statusCode: "200"
+            responseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+    post:
+      summary: "デバイス情報の登録 API"
+      # Cognito Authorizer を有効にする場合
+      # security:
+      #   - cognitoAuthorizer: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/device"
+      responses:
+        200:
+          description: "成功時のレスポンス"
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: "string"
+      x-amazon-apigateway-integration:
+        # マッピングテンプレートを設定するため AWS にし、非プロキシ統合 (カスタム設定) を有効にする
+        type: AWS
+        httpMethod: POST
+        credentials:
+          Fn::Sub: ${PlaygroundApiRole.Arn}
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PostFunction.Arn}/invocations
+        passthroughBehavior: WHEN_NO_TEMPLATES
+        # Lambda は API Gateway からの呼び出しは application/json 形式を期待しているため、バイナリデータを渡すことはできない
+        # そのため CONVERT_TO_TEXT を設定し、バイナリデータを JSON プロパティに割り当てるマッピングテンプレートを提供する
+        contentHandling: CONVERT_TO_TEXT
+        # https://docs.aws.amazon.com/ja_jp/apigateway/latest/developerguide/api-gateway-swagger-extensions-integration-requestTemplates.html
+        requestTemplates:
+          multipart/form-data: |
+            #set($allParams = $input.params())
+            {
+              "body" : $input.json('$'),
+              #set($header = $allParams.get('header'))
+              "headers" : {
+                "content-type" : "$util.escapeJavaScript($header.get('content-type'))",
+                "content-length" : $input.body.length()
+              }
+            }
+        responses:
+          default:
+            statusCode: 200
+            responseTemplates:
+              application/json: |
+                #set($root = $input.path('$'))
+                #if($root.toString().contains("error"))
+                  #set($context.responseOverride.status = $input.path('$.statusCode'))
+                  $input.json("$.error")
+                #end
+            responseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+    # CORS の設定を行う
+    # SEE: https://docs.aws.amazon.com/ja_jp/apigateway/latest/developerguide/enable-cors-for-resource-using-swagger-importer-tool.html
+    options:
+      summary: "CORS setting"
+      responses:
+        200:
+          description: "成功時のレスポンス"
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+            Access-Control-Allow-Methods:
+              schema:
+                type: string
+            Access-Control-Allow-Headers:
+              schema:
+                type: string
+          content: {}
+      x-amazon-apigateway-integration:
+        type: mock
+        requestTemplates:
+          application/json: |
+            {
+              "statusCode" : 200
+            }
+        responses:
+          default:
+            statusCode: "200"
+            responseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+            responseTemplates:
+              application/json: |
+                {}
+
+components:
+  # Cognito Authorizer を有効にする場合
+  # securitySchemes:
+  #   cognitoAuthorizer:
+  #     type: "apiKey"
+  #     name: "Authorization"
+  #     in: "header"
+  #     x-amazon-apigateway-authtype: "cognito_user_pools"
+  #     x-amazon-apigateway-authorizer:
+  #       type: "cognito_user_pools"
+  #       providerARNs:
+  #         - Fn::Sub: ${UserPoolArn}
+  schemas:
+    device:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
